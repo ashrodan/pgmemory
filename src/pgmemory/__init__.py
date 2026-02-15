@@ -11,6 +11,10 @@ Adapters (optional deps):
     from pgmemory.adapters.langchain import LangChainMemory, build_langchain_tools
 """
 
+from importlib.metadata import version
+
+__version__ = version("pgmemory")
+
 from .embeddings import (
     EmbeddingProvider,
     OllamaEmbeddingProvider,
@@ -21,6 +25,8 @@ from .store import MemoryStore
 from .types import Category, Memory, SearchQuery, SearchResult
 
 __all__ = [
+    # Version
+    "__version__",
     # Core
     "MemoryStore",
     "Memory",

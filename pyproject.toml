@@ -26,6 +26,12 @@ dependencies = [
     "pgvector>=0.3.6",
 ]
 
+[project.urls]
+Homepage = "https://github.com/ashleyrodan/pgmemory"
+Repository = "https://github.com/ashleyrodan/pgmemory"
+Issues = "https://github.com/ashleyrodan/pgmemory/issues"
+Changelog = "https://github.com/ashleyrodan/pgmemory/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 adk = ["google-adk>=1.0.0", "google-genai>=1.0.0"]
 vertex = ["google-genai>=1.0.0"]
@@ -37,6 +43,8 @@ dev = [
     "pytest-asyncio>=0.24",
     "testcontainers[postgres]>=4.0",
     "mypy>=1.10",
+    "bump-my-version>=0.28",
+    "twine>=6.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -63,3 +71,15 @@ asyncio_mode = "auto"
 filterwarnings = [
     "ignore:This declarative base already contains a class:sqlalchemy.exc.SAWarning",
 ]
+
+[tool.bumpversion]
+current_version = "0.1.0"
+commit = true
+tag = true
+tag_name = "v{new_version}"
+message = "release: v{new_version}"
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'

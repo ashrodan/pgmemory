@@ -1,4 +1,4 @@
-.PHONY: test unit integration pglite docker typecheck build clean
+.PHONY: test unit integration pglite docker typecheck build clean release-patch release-minor release-major check-build
 
 test: unit integration  ## Run all tests (unit + integration against local Postgres)
 
@@ -22,6 +22,18 @@ build:  ## Build sdist + wheel
 
 clean:  ## Remove build artifacts
 	rm -rf dist/ build/ *.egg-info src/*.egg-info .mypy_cache .pytest_cache
+
+release-patch:  ## Bump patch version, commit, and tag (e.g., 0.1.0 → 0.1.1)
+	uv run bump-my-version bump patch
+
+release-minor:  ## Bump minor version, commit, and tag (e.g., 0.1.0 → 0.2.0)
+	uv run bump-my-version bump minor
+
+release-major:  ## Bump major version, commit, and tag (e.g., 0.1.0 → 1.0.0)
+	uv run bump-my-version bump major
+
+check-build:  ## Build and validate package with twine
+	uv build && uv run twine check dist/*
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
