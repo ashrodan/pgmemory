@@ -3,7 +3,8 @@ import os
 from google.adk.agents.llm_agent import Agent
 
 from pgmemory import MemoryStore, OpenAIEmbeddingProvider
-from pgmemory.adapters.adk import build_adk_tools
+from pgmemory import MEMORY_INSTRUCTIONS
+from pgmemory.adapters.adk import build_adk_tools, build_context_injection
 
 store = MemoryStore(
     os.environ.get(
@@ -14,18 +15,23 @@ store = MemoryStore(
 )
 
 memory_tools = build_adk_tools(store)
+inject_memory = build_context_injection(store)
+
+
+async def _init_memory(callback_context):
+    """Eagerly create the pgvector extension and memory table on first run."""
+    await store.init()
+
 
 root_agent = Agent(
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     name="root_agent",
     description="A helpful assistant with long-term memory.",
     instruction=(
-        "You are a helpful assistant with long-term memory. "
-        "Use the remember_fact tool to store important information the user tells you "
-        "(preferences, facts about them, project details, etc). "
-        "Use reinforce_memory to mark a memory as important when the user confirms it. "
-        "Use forget_memory to remove outdated information. "
-        "When the user asks you to recall something, search your memory first."
+        "You are a helpful assistant with long-term memory.\n\n"
+        + MEMORY_INSTRUCTIONS
     ),
     tools=memory_tools,
+    before_agent_callback=_init_memory,
+    before_model_callback=inject_memory,
 )

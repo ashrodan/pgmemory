@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, literal_column, select, text, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -84,6 +84,14 @@ class MemoryStore:
     # ────────────────────────────────────────────────────────────────
     # Setup
     # ────────────────────────────────────────────────────────────────
+
+    async def __aenter__(self) -> MemoryStore:
+        """Eager init: ``async with MemoryStore(...) as store:``."""
+        await self.init()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()
 
     async def init(self) -> None:
         """Create the pgvector extension and memory table if needed.
@@ -199,20 +207,9 @@ class MemoryStore:
         """
         await self._ensure_init()
 
-        query_embeddings = await self._embedder.embed([query.text])
-        query_vec = query_embeddings[0]
         M = self._model
         now = datetime.now(timezone.utc)
-
-        # ── Build score expressions ─────────────────────────────────
-        similarity_expr = (1 - M.content_embedding.cosine_distance(query_vec)).label(
-            "similarity"
-        )
-
-        keyword_expr = func.ts_rank(
-            M.content_tsv,
-            func.plainto_tsquery("english", query.text),
-        ).label("keyword_score")
+        is_browse = not query.text.strip()
 
         # Recency: 1 / (1 + age_in_days / 30). Newer = higher.
         age_seconds = func.extract("epoch", now - M.created_at)
@@ -220,12 +217,33 @@ class MemoryStore:
             "recency_score"
         )
 
-        combined_expr = (
-            query.weight_similarity * (1 - M.content_embedding.cosine_distance(query_vec))
-            + query.weight_keyword
-            * func.ts_rank(M.content_tsv, func.plainto_tsquery("english", query.text))
-            + query.weight_recency * (1.0 / (1.0 + age_seconds / (30.0 * 86400.0)))
-        ).label("combined_score")
+        if is_browse:
+            # Browse mode: skip embedding/keyword scoring, order by recency
+            similarity_expr = literal_column("0.0").label("similarity")
+            keyword_expr = literal_column("0.0").label("keyword_score")
+            combined_expr = (
+                query.weight_recency * (1.0 / (1.0 + age_seconds / (30.0 * 86400.0)))
+            ).label("combined_score")
+        else:
+            # ── Build score expressions ─────────────────────────────
+            query_embeddings = await self._embedder.embed([query.text])
+            query_vec = query_embeddings[0]
+
+            similarity_expr = (1 - M.content_embedding.cosine_distance(query_vec)).label(
+                "similarity"
+            )
+
+            keyword_expr = func.ts_rank(
+                M.content_tsv,
+                func.plainto_tsquery("english", query.text),
+            ).label("keyword_score")
+
+            combined_expr = (
+                query.weight_similarity * (1 - M.content_embedding.cosine_distance(query_vec))
+                + query.weight_keyword
+                * func.ts_rank(M.content_tsv, func.plainto_tsquery("english", query.text))
+                + query.weight_recency * (1.0 / (1.0 + age_seconds / (30.0 * 86400.0)))
+            ).label("combined_score")
 
         # ── Base query ──────────────────────────────────────────────
         stmt = select(M, similarity_expr, keyword_expr, recency_expr, combined_expr).where(
@@ -250,7 +268,10 @@ class MemoryStore:
             stmt = stmt.where(M.importance >= query.min_importance)
 
         # ── Sort + limit ────────────────────────────────────────────
-        stmt = stmt.order_by(combined_expr.desc()).limit(query.top_k)
+        if is_browse:
+            stmt = stmt.order_by(M.created_at.desc()).limit(query.top_k)
+        else:
+            stmt = stmt.order_by(combined_expr.desc()).limit(query.top_k)
 
         # ── Execute ─────────────────────────────────────────────────
         async with self._session_factory() as db:
@@ -270,7 +291,7 @@ class MemoryStore:
         # ── Build results ───────────────────────────────────────────
         results = []
         for row, sim, kw, rec, combined in rows:
-            if sim < query.similarity_threshold:
+            if not is_browse and sim < query.similarity_threshold:
                 continue
             results.append(
                 SearchResult(

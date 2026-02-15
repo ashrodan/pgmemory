@@ -95,6 +95,17 @@ class SearchResult:
     def text(self) -> str:
         return self.memory.text
 
+    @staticmethod
+    def format_results(results: list[SearchResult]) -> str:
+        """Format search results as an LLM-readable string."""
+        if not results:
+            return "No relevant memories found."
+        return "\n".join(
+            f"[id={r.memory.id}] ({r.memory.category.value}, "
+            f"score={r.combined_score:.2f}) {r.memory.text}"
+            for r in results
+        )
+
 
 @dataclass
 class SearchQuery:

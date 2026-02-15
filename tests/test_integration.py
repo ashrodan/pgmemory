@@ -193,6 +193,16 @@ class TestSearch:
         assert len(results) >= 1
 
     @pytest.mark.asyncio
+    async def test_browse_mode_empty_query(self, store):
+        await store.add("browse_app", "u1", "Browsable fact", category=Category.FACT)
+        results = await store.search(
+            SearchQuery(app_name="browse_app", user_id="u1", text="")
+        )
+        assert len(results) >= 1
+        assert results[0].similarity == 0.0
+        assert results[0].keyword_score == 0.0
+
+    @pytest.mark.asyncio
     async def test_search_updates_last_accessed(self, store):
         mid = await store.add("la_app", "u1", "Track access time")
         mem_before = await store.get(mid)

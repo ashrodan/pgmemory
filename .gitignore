@@ -18,3 +18,4 @@ htmlcov/
 .coverage
 *.lcov
 site/
+**/*/.adk/session.db

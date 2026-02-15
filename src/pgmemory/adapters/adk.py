@@ -30,8 +30,9 @@ from typing import Any, Optional
 
 from typing_extensions import override
 
+from .. import MEMORY_INSTRUCTIONS
 from ..store import MemoryStore
-from ..types import Category, Memory, SearchQuery
+from ..types import Category, Memory, SearchQuery, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,7 @@ class ADKMemoryService:
 def build_adk_tools(store: MemoryStore) -> list:
     """Create ADK FunctionTools bound to a MemoryStore.
 
-    Returns tools for: commit_session, remember_fact, forget, reinforce.
+    Returns tools for: search_memory, commit_session, remember_fact, forget, reinforce.
     Wire into your agent alongside ADK's preload_memory / load_memory.
     """
     from google.adk.tools import FunctionTool, ToolContext
@@ -269,9 +270,103 @@ def build_adk_tools(store: MemoryStore) -> list:
         await store.promote(memory_id)
         return f"Memory {memory_id} reinforced."
 
+    async def search_memory(
+        tool_context: ToolContext,
+        query: str = "",
+        category: Optional[str] = None,
+    ) -> str:
+        """Search long-term memory for relevant information.
+
+        Args:
+            query: Natural language search query. Leave blank to browse by category.
+            category: Optional category filter (fact, preference, skill, context, rule, event).
+        """
+        session = tool_context._invocation_context.session
+        categories = None
+        if category:
+            try:
+                categories = [Category(category.lower())]
+            except ValueError:
+                pass
+
+        results = await store.search(
+            SearchQuery(
+                app_name=getattr(session, "app_name", ""),
+                user_id=session.user_id,
+                text=query,
+                categories=categories,
+            )
+        )
+
+        return SearchResult.format_results(results)
+
     return [
+        FunctionTool(search_memory),
         FunctionTool(commit_session_to_memory),
         FunctionTool(remember_fact),
         FunctionTool(forget_memory),
         FunctionTool(reinforce_memory),
     ]
+
+
+def build_context_injection(
+    store: MemoryStore,
+    *,
+    top_k: int = 5,
+    similarity_threshold: float = 0.5,
+    profile_k: int = 3,
+):
+    """Return a before_model_callback that injects relevant memories.
+
+    On each LLM turn, searches the MemoryStore with the user's message
+    and appends matching results as instructions so the model sees them
+    without needing to call search_memory itself.
+
+    When no results match the query, falls back to injecting the top
+    ``profile_k`` most recent memories as general user context.
+    """
+
+    async def _inject(callback_context, llm_request):
+        session = callback_context._invocation_context.session
+        user_content = callback_context.user_content
+        if not user_content or not user_content.parts:
+            return None
+        texts = [p.text for p in user_content.parts if getattr(p, "text", None)]
+        query_text = " ".join(texts).strip()
+        if not query_text:
+            return None
+
+        app_name = getattr(session, "app_name", "")
+
+        results = await store.search(
+            SearchQuery(
+                app_name=app_name,
+                user_id=session.user_id,
+                text=query_text,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+            )
+        )
+        if results:
+            llm_request.append_instructions([
+                "Relevant memories:\n" + SearchResult.format_results(results)
+            ])
+        elif profile_k > 0:
+            # No direct matches — inject a user profile from recent memories
+            profile = await store.search(
+                SearchQuery(
+                    app_name=app_name,
+                    user_id=session.user_id,
+                    text="",
+                    top_k=profile_k,
+                )
+            )
+            if profile:
+                llm_request.append_instructions([
+                    "No memories directly match the current query, but here is "
+                    "general context about this user to keep in mind:\n"
+                    + SearchResult.format_results(profile)
+                ])
+        return None
+
+    return _inject

@@ -22,6 +22,7 @@ import asyncio
 import logging
 from typing import Any
 
+from .. import MEMORY_INSTRUCTIONS
 from ..store import MemoryStore
 from ..types import Category, Memory, SearchQuery, SearchResult
 
@@ -115,16 +116,11 @@ def build_langchain_tools(store: MemoryStore, app_name: str, user_id: str) -> li
             "pip install langchain-core"
         )
 
-    async def _search(query: str) -> str:
+    async def _search(query: str = "") -> str:
         results = await store.search(
             SearchQuery(app_name=app_name, user_id=user_id, text=query)
         )
-        if not results:
-            return "No relevant memories found."
-        return "\n".join(
-            f"[id={r.memory.id} cat={r.memory.category.value} sim={r.similarity}] {r.text}"
-            for r in results
-        )
+        return SearchResult.format_results(results)
 
     async def _remember(fact: str) -> str:
         mid = await store.add(app_name, user_id, fact, category=Category.FACT)
