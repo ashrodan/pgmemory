@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pgmemory"
+version = "0.1.0"
+description = "Opinionated multi-user agent memory on PostgreSQL + pgvector. Hybrid SQL/semantic search, lifecycle management, framework-agnostic."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+keywords = ["agent", "memory", "pgvector", "postgresql", "llm", "embeddings"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30.0",
+    "pgvector>=0.3.6",
+]
+
+[project.optional-dependencies]
+adk = ["google-adk>=1.0.0", "google-genai>=1.0.0"]
+vertex = ["google-genai>=1.0.0"]
+ollama = ["ollama>=0.4.0"]
+openai = ["openai>=1.50.0"]
+all = ["pgmemory[adk,vertex,ollama,openai]"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "testcontainers[postgres]>=4.0",
+    "mypy>=1.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pgmemory"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/pgmemory/py.typed" = "pgmemory/py.typed"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
+[[tool.mypy.overrides]]
+module = [
+    "pgvector.*",
+    "ollama.*",
+    "google.*",
+    "testcontainers.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
