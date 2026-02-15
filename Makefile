@@ -1,4 +1,4 @@
-.PHONY: test unit integration pglite docker typecheck build clean release-patch release-minor release-major check-build
+.PHONY: test unit integration pglite docker typecheck build clean release-patch release-minor release-major check-build docs docs-serve
 
 test: unit integration  ## Run all tests (unit + integration against local Postgres)
 
@@ -34,6 +34,12 @@ release-major:  ## Bump major version, commit, and tag (e.g., 0.1.0 → 1.0.0)
 
 check-build:  ## Build and validate package with twine
 	uv build && uv run twine check dist/*
+
+docs:  ## Build documentation site
+	uv run --extra docs mkdocs build
+
+docs-serve:  ## Serve docs locally with hot-reload
+	uv run --extra docs mkdocs serve
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
