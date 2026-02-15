@@ -55,8 +55,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
+        run: uv sync --extra dev --extra all
       - name: Run ty
-        run: uvx ty check
+        run: uvx ty check --python .venv
 
   build:
     runs-on: ubuntu-latest
