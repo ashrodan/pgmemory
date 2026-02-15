@@ -1,0 +1,14 @@
+[project]
+name = "adk-example"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-adk>=1.0.0",
+    "google-genai>=1.0.0",
+    "pgmemory[openai]",
+]
+
+[tool.uv.sources]
+pgmemory = { path = "../../..", editable = true }

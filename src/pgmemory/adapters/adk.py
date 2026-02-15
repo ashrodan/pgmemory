@@ -23,12 +23,10 @@ Usage:
     )
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 from typing_extensions import override
 
@@ -218,7 +216,7 @@ def build_adk_tools(store: MemoryStore) -> list:
         fact: str,
         category: str = "fact",
         importance: int = 1,
-        expires_in_days: int | None = None,
+        expires_in_days: Optional[int] = None,
     ) -> str:
         """Store a specific fact with category and importance.
 
