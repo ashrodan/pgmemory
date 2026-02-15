@@ -42,9 +42,6 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/pgmemory"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/pgmemory/py.typed" = "pgmemory/py.typed"
-
 [tool.mypy]
 python_version = "3.11"
 strict = true
@@ -63,3 +60,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+filterwarnings = [
+    "ignore:This declarative base already contains a class:sqlalchemy.exc.SAWarning",
+]

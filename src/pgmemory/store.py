@@ -321,19 +321,16 @@ class MemoryStore:
         await self._ensure_init()
         now = datetime.now(timezone.utc)
         async with self._session_factory() as db:
+            row = await db.get(self._model, memory_id)
+            if row is None:
+                return
+            existing = dict(row.metadata_ or {})
+            existing["expired_reason"] = reason
+            existing["expired_at"] = now.isoformat()
             await db.execute(
                 update(self._model)
                 .where(self._model.id == memory_id)
-                .values(
-                    valid_until=now,
-                    metadata_=text(
-                        "metadata || jsonb_build_object("
-                        "'expired_reason', :reason, "
-                        "'expired_at', :expired_at"
-                        ")"
-                    ),
-                ),
-                {"reason": reason, "expired_at": now.isoformat()},
+                .values(valid_until=now, metadata_=existing)
             )
             await db.commit()
 

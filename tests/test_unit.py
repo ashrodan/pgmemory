@@ -86,7 +86,7 @@ class TestBuildTable:
         assert Model.__tablename__ == "test_tbl"
 
     def test_all_columns_present(self):
-        Model = build_table("test_tbl", 768)
+        Model = build_table("test_tbl_cols", 768)
         col_names = {c.name for c in Model.__table__.columns}
         expected = {
             "id", "app_name", "user_id", "content", "content_embedding",
