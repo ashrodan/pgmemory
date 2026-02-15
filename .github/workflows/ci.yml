@@ -59,8 +59,8 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -e ".[dev,all]"
-      - name: Run mypy
-        run: mypy src/pgmemory
+      - name: Run ty
+        run: pipx run ty check
 
   build:
     runs-on: ubuntu-latest

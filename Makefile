@@ -14,8 +14,8 @@ pglite:  ## Integration tests via ephemeral Postgres cluster (port 55433)
 docker:  ## Build + run tests in Docker container
 	uv run scripts/test_docker.py
 
-typecheck:  ## Run mypy
-	uv run mypy src/pgmemory
+typecheck:  ## Run ty type checker
+	uvx ty check
 
 build:  ## Build sdist + wheel
 	uv build

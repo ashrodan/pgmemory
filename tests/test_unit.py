@@ -69,7 +69,7 @@ class TestSearchQuery:
             app_name="a", user_id="u", text="q",
             categories=[Category.FACT, Category.PREFERENCE],
         )
-        assert len(q.categories) == 2
+        assert q.categories is not None and len(q.categories) == 2
 
 
 class TestSearchResult:

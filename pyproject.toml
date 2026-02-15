@@ -42,7 +42,6 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "testcontainers[postgres]>=4.0",
-    "mypy>=1.10",
     "bump-my-version>=0.28",
     "twine>=6.0",
 ]
@@ -50,21 +49,24 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/pgmemory"]
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-plugins = ["sqlalchemy.ext.mypy.plugin"]
+[tool.ty.environment]
+python-version = "3.11"
 
-[[tool.mypy.overrides]]
-module = [
-    "pgvector.*",
-    "ollama.*",
-    "google.*",
-    "testcontainers.*",
+[tool.ty.analysis]
+allowed-unresolved-imports = [
+    "pgvector.**",
+    "ollama.**",
+    "google.**",
+    "openai.**",
+    "langchain_core.**",
+    "testcontainers.**",
 ]
-ignore_missing_imports = true
+
+# SQLAlchemy uses declarative patterns (Column(), dynamic models) that ty
+# cannot understand without a plugin. Suppress these until ty gains plugin support.
+[tool.ty.rules]
+invalid-assignment = "ignore"
+unresolved-attribute = "ignore"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
