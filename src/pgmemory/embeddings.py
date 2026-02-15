@@ -58,7 +58,8 @@ class VertexEmbeddingProvider(EmbeddingProvider):
                 output_dimensionality=self._dimensions,
             ),
         )
-        return [e.values for e in response.embeddings]
+        assert response.embeddings is not None
+        return [e.values for e in response.embeddings if e.values is not None]
 
 
 class OllamaEmbeddingProvider(EmbeddingProvider):
