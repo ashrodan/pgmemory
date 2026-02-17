@@ -9,6 +9,7 @@ combined with a weighted score that includes recency.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
@@ -63,10 +64,12 @@ class MemoryStore:
         table_name: str = "memory",
         pool_size: int = 5,
         pool_recycle: int = 300,
+        enrich_embeddings: bool = False,
     ):
         self._connection_string = connection_string
         self._embedder = embedding_provider
         self._table_name = table_name
+        self._enrich_embeddings = enrich_embeddings
 
         self._model = build_table(table_name, embedding_provider.dimensions)
 
@@ -80,6 +83,18 @@ class MemoryStore:
         )
 
         self._initialized = False
+
+    def _enriched_text(self, text: str, category: Category) -> str:
+        """Prepend category to text for embedding when enrichment is enabled.
+
+        The stored content is always raw text — this only affects the vector
+        that gets embedded, so "I love cake" with category PREFERENCE embeds
+        as "preference: I love cake", placing it closer to food/preference
+        queries in the embedding space.
+        """
+        if self._enrich_embeddings:
+            return f"{category.value}: {text}"
+        return text
 
     # ────────────────────────────────────────────────────────────────
     # Setup
@@ -136,7 +151,8 @@ class MemoryStore:
         """Store a single memory. Returns its ID."""
         await self._ensure_init()
 
-        embeddings = await self._embedder.embed([text_content])
+        embed_text = self._enriched_text(text_content, category)
+        embeddings = await self._embedder.embed([embed_text])
         now = datetime.now(timezone.utc)
 
         mem = Memory(
@@ -172,7 +188,7 @@ class MemoryStore:
         if not memories:
             return []
 
-        texts = [m.text for m in memories]
+        texts = [self._enriched_text(m.text, m.category) for m in memories]
         embeddings = await self._embedder.embed(texts)
 
         ids = []
@@ -291,7 +307,15 @@ class MemoryStore:
         # ── Build results ───────────────────────────────────────────
         results = []
         for row, sim, kw, rec, combined in rows:
-            if not is_browse and sim < query.similarity_threshold:
+            logger.debug(
+                "  candidate id=%s sim=%.4f kw=%.4f rec=%.4f combined=%.4f "
+                "threshold=%.4f text=%r",
+                row.id, float(sim), float(kw), float(rec), float(combined),
+                query.similarity_threshold, row.content[:80],
+            )
+            if not is_browse and combined < query.similarity_threshold:
+                logger.debug("  → FILTERED (combined %.4f < threshold %.4f)",
+                             float(combined), query.similarity_threshold)
                 continue
             results.append(
                 SearchResult(
@@ -300,16 +324,52 @@ class MemoryStore:
                     keyword_score=round(float(kw), 4),
                     recency_score=round(float(rec), 4),
                     combined_score=round(float(combined), 4),
+                    source_query=query,
                 )
             )
 
+        # ── Percentile filtering ────────────────────────────────────
+        if query.threshold_percentile is not None and results:
+            cutoff_idx = int(len(results) * query.threshold_percentile)
+            if cutoff_idx > 0:
+                cutoff_score = results[-cutoff_idx].combined_score
+                results = [r for r in results if r.combined_score > cutoff_score]
+
         logger.debug(
-            "search: user=%s query=%r → %d results",
+            "search: user=%s query=%r → %d results (from %d candidates)",
             query.user_id,
             query.text[:60],
             len(results),
+            len(rows),
         )
         return results
+
+    async def search_many(
+        self,
+        queries: Sequence[SearchQuery],
+        *,
+        top_k: int = 10,
+    ) -> list[SearchResult]:
+        """Run multiple searches in parallel and merge into one ranked list.
+
+        - Fires all queries concurrently via asyncio.gather
+        - Deduplicates by memory.id, keeping the result with the highest combined_score
+        - Returns up to ``top_k`` results sorted by combined_score descending
+        """
+        if not queries:
+            return []
+
+        all_results = await asyncio.gather(*[self.search(q) for q in queries])
+
+        best: dict[int | None, SearchResult] = {}
+        for result_list in all_results:
+            for r in result_list:
+                key = r.memory.id
+                if key not in best or r.combined_score > best[key].combined_score:
+                    best[key] = r
+
+        merged = sorted(best.values(), key=lambda r: r.combined_score, reverse=True)
+        return merged[:top_k]
 
     async def get(self, memory_id: int) -> Memory | None:
         """Fetch a single memory by ID."""
@@ -438,7 +498,8 @@ class MemoryStore:
         contradicting memory.
         """
         await self._ensure_init()
-        embeddings = await self._embedder.embed([text_content])
+        embed_text = self._enriched_text(text_content, category)
+        embeddings = await self._embedder.embed([embed_text])
         vec = embeddings[0]
         M = self._model
         cat_val = category.value if isinstance(category, Category) else category

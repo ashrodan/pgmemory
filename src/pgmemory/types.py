@@ -86,6 +86,7 @@ class SearchResult:
     keyword_score: float = 0.0    # full-text search rank
     recency_score: float = 0.0    # time-decay score
     combined_score: float = 0.0   # weighted composite
+    source_query: SearchQuery | None = None  # which query surfaced this result
 
     @property
     def id(self) -> int | None:
@@ -121,7 +122,8 @@ class SearchQuery:
     min_importance: int | None = None
     include_expired: bool = False
     top_k: int = 10
-    similarity_threshold: float = 0.4
+    similarity_threshold: float = 0.2
+    threshold_percentile: float | None = None  # 0.0–1.0, e.g. 0.3 = filter bottom 30%
 
     # Scoring weights (must sum to ~1.0)
     weight_similarity: float = 0.6

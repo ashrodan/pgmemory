@@ -6,6 +6,7 @@ import pytest
 
 from pgmemory.types import Category, Memory, SearchQuery, SearchResult
 from pgmemory.models import build_table
+from pgmemory.store import MemoryStore
 
 
 class TestCategory:
@@ -54,7 +55,7 @@ class TestSearchQuery:
     def test_defaults(self):
         q = SearchQuery(app_name="a", user_id="u", text="q")
         assert q.top_k == 10
-        assert q.similarity_threshold == 0.4
+        assert q.similarity_threshold == 0.2
         assert not q.include_expired
 
     def test_weights_customisable(self):
@@ -117,3 +118,53 @@ class TestBuildTable:
         assert back.category == Category.FACT
         assert back.importance == 3
         assert back.metadata == {"key": "value"}
+
+
+class TestPercentileThreshold:
+    def test_defaults_to_none(self):
+        q = SearchQuery(app_name="a", user_id="u", text="q")
+        assert q.threshold_percentile is None
+
+    def test_setting_value(self):
+        q = SearchQuery(app_name="a", user_id="u", text="q", threshold_percentile=0.3)
+        assert q.threshold_percentile == 0.3
+
+    def test_coexists_with_similarity_threshold(self):
+        q = SearchQuery(
+            app_name="a", user_id="u", text="q",
+            similarity_threshold=0.1, threshold_percentile=0.5,
+        )
+        assert q.similarity_threshold == 0.1
+        assert q.threshold_percentile == 0.5
+
+
+class TestEnrichedText:
+    """Tests for MemoryStore._enriched_text (no DB needed)."""
+
+    def _make_store(self, enrich: bool):
+        from tests.helpers import FakeEmbeddingProvider
+        return MemoryStore(
+            "postgresql+asyncpg://fake@localhost/fake",
+            FakeEmbeddingProvider(dims=16),
+            enrich_embeddings=enrich,
+        )
+
+    def test_disabled_returns_raw_text(self):
+        store = self._make_store(enrich=False)
+        assert store._enriched_text("I love cake", Category.PREFERENCE) == "I love cake"
+
+    def test_enabled_prepends_category(self):
+        store = self._make_store(enrich=True)
+        result = store._enriched_text("I love cake", Category.PREFERENCE)
+        assert result == "preference: I love cake"
+
+    def test_enabled_all_categories(self):
+        store = self._make_store(enrich=True)
+        for cat in Category:
+            result = store._enriched_text("test text", cat)
+            assert result == f"{cat.value}: test text"
+
+    def test_disabled_ignores_category(self):
+        store = self._make_store(enrich=False)
+        for cat in Category:
+            assert store._enriched_text("hello", cat) == "hello"

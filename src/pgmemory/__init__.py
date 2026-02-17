@@ -4,7 +4,7 @@ Core (no framework deps):
     from pgmemory import MemoryStore, Category, Memory, SearchQuery
 
 Embedding providers:
-    from pgmemory import VertexEmbeddingProvider, OllamaEmbeddingProvider, OpenAIEmbeddingProvider
+    from pgmemory import VertexEmbeddingProvider, OllamaEmbeddingProvider, OpenAIEmbeddingProvider, VoyageEmbeddingProvider
 
 Adapters (optional deps):
     from pgmemory.adapters.adk import ADKMemoryService, build_adk_tools, build_context_injection
@@ -20,6 +20,7 @@ from .embeddings import (
     OllamaEmbeddingProvider,
     OpenAIEmbeddingProvider,
     VertexEmbeddingProvider,
+    VoyageEmbeddingProvider,
 )
 from .store import MemoryStore
 from .types import Category, Memory, SearchQuery, SearchResult
@@ -54,4 +55,5 @@ __all__ = [
     "VertexEmbeddingProvider",
     "OllamaEmbeddingProvider",
     "OpenAIEmbeddingProvider",
+    "VoyageEmbeddingProvider",
 ]

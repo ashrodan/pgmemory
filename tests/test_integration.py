@@ -340,3 +340,71 @@ class TestAdmin:
         users = await store.list_users("users_app")
         assert "alpha" in users
         assert "beta" in users
+
+
+# ── Embedding enrichment ──────────────────────────────────────────────
+
+
+@pytest_asyncio.fixture
+async def enriched_store(pg_url):
+    s = MemoryStore(
+        pg_url,
+        FakeEmbeddingProvider(dims=16),
+        table_name="test_enriched",
+        enrich_embeddings=True,
+    )
+    await s.init()
+    yield s
+    await s.close()
+
+
+class TestEnrichment:
+    @pytest.mark.asyncio
+    async def test_content_stores_raw_text(self, enriched_store):
+        """Content column should store raw text, not enriched text."""
+        mid = await enriched_store.add(
+            "enrich_app", "u1", "I love cake",
+            category=Category.PREFERENCE,
+        )
+        mem = await enriched_store.get(mid)
+        assert mem.text == "I love cake"
+        assert "preference:" not in mem.text
+
+    @pytest.mark.asyncio
+    async def test_enriched_produces_different_embeddings(self, pg_url):
+        """Same text with enrichment on vs off should produce different embeddings."""
+        plain = MemoryStore(
+            pg_url,
+            FakeEmbeddingProvider(dims=16),
+            table_name="test_enrich_plain",
+            enrich_embeddings=False,
+        )
+        enriched = MemoryStore(
+            pg_url,
+            FakeEmbeddingProvider(dims=16),
+            table_name="test_enrich_rich",
+            enrich_embeddings=True,
+        )
+        await plain.init()
+        await enriched.init()
+
+        try:
+            plain_id = await plain.add("app", "u1", "I love cake",
+                                       category=Category.PREFERENCE)
+            enriched_id = await enriched.add("app", "u1", "I love cake",
+                                             category=Category.PREFERENCE)
+
+            # Retrieve raw embeddings from the database
+            async with plain._session_factory() as db:
+                row = await db.get(plain._model, plain_id)
+                plain_vec = list(row.content_embedding)
+
+            async with enriched._session_factory() as db:
+                row = await db.get(enriched._model, enriched_id)
+                enriched_vec = list(row.content_embedding)
+
+            # Vectors should differ because enriched embeds "preference: I love cake"
+            assert plain_vec != enriched_vec
+        finally:
+            await plain.close()
+            await enriched.close()

@@ -5,6 +5,7 @@ from google.adk.agents.llm_agent import Agent
 from pgmemory import MemoryStore, OpenAIEmbeddingProvider
 from pgmemory import MEMORY_INSTRUCTIONS
 from pgmemory.adapters.adk import build_adk_tools, build_context_injection
+from pgmemory.types import SearchQuery
 
 store = MemoryStore(
     os.environ.get(
@@ -15,7 +16,21 @@ store = MemoryStore(
 )
 
 memory_tools = build_adk_tools(store)
-inject_memory = build_context_injection(store)
+
+
+def my_queries(text, app_name, user_id):
+    """Generate multiple search queries for broader recall.
+
+    Runs a targeted semantic search alongside a general profile load
+    (empty text = most recent memories) so the model always has user
+    context even when the query doesn't match stored memories well.
+    """
+    targeted = SearchQuery(app_name=app_name, user_id=user_id, text=text, top_k=5)
+    profile = SearchQuery(app_name=app_name, user_id=user_id, text="", top_k=3)
+    return [targeted, profile]
+
+
+inject_memory = build_context_injection(store, queries=my_queries)
 
 
 async def _init_memory(callback_context):

@@ -124,3 +124,35 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             dimensions=self._dimensions,
         )
         return [item.embedding for item in response.data]
+
+
+class VoyageEmbeddingProvider(EmbeddingProvider):
+    """Voyage AI embeddings (Anthropic-recommended).
+
+    pip install pgmemory[voyage]
+    """
+
+    def __init__(
+        self,
+        model: str = "voyage-3",
+        *,
+        dimensionality: int = 1024,
+        api_key: str | None = None,
+    ):
+        self._model = model
+        self._dimensions = dimensionality
+        self._api_key = api_key
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        import voyageai
+
+        client = voyageai.AsyncClient(api_key=self._api_key)
+        response = await client.embed(
+            texts=list(texts),
+            model=self._model,
+        )
+        return response.embeddings

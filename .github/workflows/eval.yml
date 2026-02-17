@@ -1,0 +1,90 @@
+name: Eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Embedding provider"
+        type: choice
+        options:
+          - matrix
+          - openai
+          - gemini
+          - voyage
+        default: matrix
+      enrich:
+        description: "Enable embedding enrichment"
+        type: boolean
+        default: true
+      percentile:
+        description: "Percentile threshold (0.0-1.0, blank to disable)"
+        type: string
+        default: ""
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ankane/pgvector:latest
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U test_user -d test_db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[dev,openai,vertex,voyage]"
+
+      - name: Run eval
+        env:
+          PGMEMORY_TEST_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.provider }}" = "matrix" ]; then
+            ARGS="--matrix"
+          else
+            ARGS="--provider ${{ inputs.provider }}"
+            if [ "${{ inputs.enrich }}" = "true" ]; then
+              ARGS="$ARGS --enrich"
+            fi
+          fi
+          if [ -n "${{ inputs.percentile }}" ]; then
+            ARGS="$ARGS --percentile ${{ inputs.percentile }}"
+          fi
+          python scripts/eval_search.py $ARGS 2>&1 | tee eval_output.txt
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Eval Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Provider | \`${{ inputs.provider }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Enrich | \`${{ inputs.enrich }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Percentile | \`${{ inputs.percentile || 'none' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -30 eval_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload eval output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-output-${{ github.run_id }}
+          path: eval_output.txt

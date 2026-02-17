@@ -26,7 +26,7 @@ Usage:
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from typing_extensions import override
 
@@ -315,12 +315,19 @@ def build_context_injection(
     top_k: int = 5,
     similarity_threshold: float = 0.5,
     profile_k: int = 3,
+    queries: Callable[[str, str, str], list[SearchQuery]] | None = None,
 ):
     """Return a before_model_callback that injects relevant memories.
 
     On each LLM turn, searches the MemoryStore with the user's message
     and appends matching results as instructions so the model sees them
     without needing to call search_memory itself.
+
+    When ``queries`` is provided, it receives ``(query_text, app_name, user_id)``
+    and should return a list of ``SearchQuery`` objects. All queries are run in
+    parallel via ``store.search_many()`` and the merged, deduplicated results are
+    injected. When ``queries`` is not provided, a single search is performed
+    (backward compatible).
 
     When no results match the query, falls back to injecting the top
     ``profile_k`` most recent memories as general user context.
@@ -338,35 +345,63 @@ def build_context_injection(
 
         app_name = getattr(session, "app_name", "")
 
-        results = await store.search(
-            SearchQuery(
-                app_name=app_name,
-                user_id=session.user_id,
-                text=query_text,
-                top_k=top_k,
-                similarity_threshold=similarity_threshold,
-            )
-        )
-        if results:
-            llm_request.append_instructions([
-                "Relevant memories:\n" + SearchResult.format_results(results)
-            ])
-        elif profile_k > 0:
-            # No direct matches — inject a user profile from recent memories
-            profile = await store.search(
+        if queries is not None:
+            query_list = queries(query_text, app_name, session.user_id)
+            results = await store.search_many(query_list, top_k=top_k)
+
+            # Split results: targeted (had query text) vs profile (empty text)
+            targeted = [
+                r for r in results
+                if r.source_query and r.source_query.text.strip()
+            ]
+            profile = [
+                r for r in results
+                if not r.source_query or not r.source_query.text.strip()
+            ]
+
+            parts = []
+            if targeted:
+                parts.append(
+                    "Relevant memories:\n"
+                    + SearchResult.format_results(targeted)
+                )
+            if profile:
+                parts.append(
+                    "General context about this user:\n"
+                    + SearchResult.format_results(profile)
+                )
+            if parts:
+                llm_request.append_instructions(parts)
+        else:
+            results = await store.search(
                 SearchQuery(
                     app_name=app_name,
                     user_id=session.user_id,
-                    text="",
-                    top_k=profile_k,
+                    text=query_text,
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
                 )
             )
-            if profile:
+
+            if results:
                 llm_request.append_instructions([
-                    "No memories directly match the current query, but here is "
-                    "general context about this user to keep in mind:\n"
-                    + SearchResult.format_results(profile)
+                    "Relevant memories:\n" + SearchResult.format_results(results)
                 ])
+            elif profile_k > 0:
+                # No direct matches — inject a user profile from recent memories
+                profile = await store.search(
+                    SearchQuery(
+                        app_name=app_name,
+                        user_id=session.user_id,
+                        text="",
+                        top_k=profile_k,
+                    )
+                )
+                if profile:
+                    llm_request.append_instructions([
+                        "General context about this user:\n"
+                        + SearchResult.format_results(profile)
+                    ])
         return None
 
     return _inject
