@@ -64,7 +64,7 @@ class MemoryStore:
         table_name: str = "memory",
         pool_size: int = 5,
         pool_recycle: int = 300,
-        enrich_embeddings: bool = False,
+        enrich_embeddings: bool = True,
     ):
         self._connection_string = connection_string
         self._embedder = embedding_provider

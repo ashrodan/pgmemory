@@ -11,7 +11,7 @@ Metrics:
 
 Usage:
     uv run --extra openai --extra vertex --extra voyage python scripts/eval_search.py
-    uv run --extra openai --extra vertex --extra voyage python scripts/eval_search.py --enrich
+    uv run --extra openai --extra vertex --extra voyage python scripts/eval_search.py --no-enrich
     uv run --extra openai --extra vertex --extra voyage python scripts/eval_search.py --provider gemini
     uv run --extra openai --extra vertex --extra voyage python scripts/eval_search.py --matrix
     uv run --extra openai --extra vertex --extra voyage python scripts/eval_search.py --threshold 0.15
@@ -388,12 +388,13 @@ def main():
         "--provider", choices=list(PROVIDERS.keys()), default="openai",
         help="Embedding provider (default: openai)",
     )
-    parser.add_argument("--enrich", action="store_true", help="Enable embedding enrichment")
+    parser.add_argument("--no-enrich", action="store_true", help="Disable embedding enrichment (enabled by default)")
     parser.add_argument("--matrix", action="store_true", help="Run all providers x enrich on/off")
     parser.add_argument("--threshold", type=float, default=0.2, help="Similarity threshold (default: 0.2)")
     parser.add_argument("--percentile", type=float, default=None, help="Percentile threshold 0.0-1.0 (e.g. 0.3 = filter bottom 30%%)")
     args = parser.parse_args()
 
+    enrich = not args.no_enrich
     pct_info = f", percentile={args.percentile}" if args.percentile is not None else ""
     if args.matrix:
         print(f"\n{'=' * 70}")
@@ -402,9 +403,9 @@ def main():
         asyncio.run(run_matrix(threshold=args.threshold, percentile=args.percentile))
     else:
         print(f"\n{'=' * 70}")
-        print(f"  pgmemory search eval — provider={args.provider}, enrich={args.enrich}, threshold={args.threshold}{pct_info}")
+        print(f"  pgmemory search eval — provider={args.provider}, enrich={enrich}, threshold={args.threshold}{pct_info}")
         print(f"{'=' * 70}\n")
-        asyncio.run(run_eval(args.provider, enrich=args.enrich, threshold=args.threshold, percentile=args.percentile))
+        asyncio.run(run_eval(args.provider, enrich=enrich, threshold=args.threshold, percentile=args.percentile))
 
 
 if __name__ == "__main__":

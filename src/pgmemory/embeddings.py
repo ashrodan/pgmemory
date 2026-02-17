@@ -155,4 +155,4 @@ class VoyageEmbeddingProvider(EmbeddingProvider):
             texts=list(texts),
             model=self._model,
         )
-        return response.embeddings
+        return [[float(v) for v in vec] for vec in response.embeddings]

@@ -99,6 +99,8 @@ Every search combines three signals:
 
 Combined score: `0.6 × similarity + 0.25 × keyword_rank + 0.15 × recency`
 
+**Embedding enrichment** — by default, pgmemory prepends the memory's category to the text before embedding (e.g. `"rule: Never store passwords in plaintext"`). This improves search quality by giving the embedding model category context. Disable with `enrich_embeddings=False` in `MemoryStore()`.
+
 Weights are configurable per query:
 
 ```python
@@ -250,6 +252,29 @@ pytest tests/test_unit.py -v
 pip install pgmemory[dev]
 pytest tests/test_integration.py -v
 ```
+
+## Evals
+
+Search quality evaluation across embedding providers. Requires API keys and a running Postgres instance.
+
+```bash
+# Single provider
+source ~/.secrets
+uv run --extra openai python scripts/eval_search.py --provider openai
+
+# Without embedding enrichment (enrichment is on by default)
+uv run --extra openai python scripts/eval_search.py --provider openai --no-enrich
+
+# All providers × enrich on/off
+uv run --extra openai --extra vertex --extra voyage python scripts/eval_search.py --matrix
+
+# With percentile filtering (drop bottom 30% of results)
+uv run --extra openai python scripts/eval_search.py --provider openai --percentile 0.3
+```
+
+Metrics reported: Top-1 Accuracy, MRR, Precision@3, Discrimination, and per-query/seed timing stats.
+
+There's also a GitHub Actions workflow (`.github/workflows/eval.yml`) that can be triggered manually from the Actions tab.
 
 ## Project structure
 

@@ -75,6 +75,22 @@ SearchQuery(
 )
 ```
 
+### Embedding enrichment
+
+By default, pgmemory prepends the memory's category to the text before generating embeddings. For example, `"Never store passwords in plaintext"` with category `RULE` becomes `"rule: Never store passwords in plaintext"` for embedding purposes (the stored text is unchanged).
+
+This gives the embedding model category context, which dramatically improves search quality — queries like `"what are the rules"` correctly surface rule-category memories that would otherwise rank lower.
+
+To disable enrichment:
+
+```python
+store = MemoryStore(
+    "postgresql+asyncpg://...",
+    embedder,
+    enrich_embeddings=False,
+)
+```
+
 ## Memory lifecycle
 
 ### Importance
