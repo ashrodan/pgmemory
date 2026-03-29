@@ -54,6 +54,28 @@ class MemoryStore:
         await store.promote(mem_id)
         await store.expire(mem_id)
         await store.decay()
+
+    Parameters:
+        connection_string: PostgreSQL connection URL (asyncpg driver)
+        embedding_provider: Provider for generating embeddings
+        table_name: Name of the memory table (default: "memory")
+        pool_size: Number of connections in the pool (default: 5)
+        pool_recycle: Recycle connections after N seconds (default: 300)
+        statement_timeout_ms: Global query timeout in milliseconds (default: 30000).
+            Applies to all queries on connections from this engine. For power users
+            who need longer timeouts for specific operations (e.g., large searches),
+            override at the session level:
+
+                async with store._session_factory() as db:
+                    await db.execute(text("SET statement_timeout = '120000'"))
+                    # ... long-running query ...
+
+        enrich_embeddings: Prepend category to text before embedding (default: True)
+
+    Connection Resilience:
+        - pool_pre_ping=True: Validates connections before use, preventing stale
+          connection errors after idle periods or network interruptions
+        - statement_timeout: Prevents hung queries from blocking the connection pool
     """
 
     def __init__(
@@ -64,6 +86,7 @@ class MemoryStore:
         table_name: str = "memory",
         pool_size: int = 5,
         pool_recycle: int = 300,
+        statement_timeout_ms: int = 30000,
         enrich_embeddings: bool = True,
     ):
         self._connection_string = connection_string
@@ -77,6 +100,12 @@ class MemoryStore:
             connection_string,
             pool_size=pool_size,
             pool_recycle=pool_recycle,
+            pool_pre_ping=True,
+            connect_args={
+                "server_settings": {
+                    "statement_timeout": str(statement_timeout_ms),
+                }
+            },
         )
         self._session_factory = async_sessionmaker(
             self._engine, expire_on_commit=False

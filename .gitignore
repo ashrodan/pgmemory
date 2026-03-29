@@ -19,3 +19,25 @@ htmlcov/
 *.lcov
 site/
 **/*/.adk/session.db
+
+# ── GSD baseline (auto-generated) ──
+.gsd
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+.env.*
+!.env.example
+node_modules/
+.next/
+*.pyc
+target/
+vendor/
+*.log
+coverage/
+.cache/
+tmp/
