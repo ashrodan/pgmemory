@@ -9,7 +9,21 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
+
+# ── Observability ───────────────────────────────────────────────────
+
+ObservabilityCallback = Callable[[str, float, dict[str, Any]], None]
+"""Callback signature for observability hooks.
+
+Called after each operation with:
+- operation: operation name (e.g., "search", "add", "promote")
+- duration_ms: operation duration in milliseconds
+- context: operation-specific metadata (user_id, memory_id, result_count, etc.)
+
+Callbacks are invoked fire-and-forget — exceptions are caught and logged,
+never propagated to the caller.
+"""
 
 
 class Category(str, enum.Enum):

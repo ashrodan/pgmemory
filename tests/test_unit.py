@@ -168,3 +168,118 @@ class TestEnrichedText:
         store = self._make_store(enrich=False)
         for cat in Category:
             assert store._enriched_text("hello", cat) == "hello"
+
+
+class TestMemoryStoreInit:
+    """Tests for MemoryStore initialization with callback parameters."""
+
+    def _make_store(self, **kwargs):
+        from tests.helpers import FakeEmbeddingProvider
+        return MemoryStore(
+            "postgresql+asyncpg://fake@localhost/fake",
+            FakeEmbeddingProvider(dims=16),
+            **kwargs,
+        )
+
+    def test_default_callbacks_are_none(self):
+        store = self._make_store()
+        assert store._on_search is None
+        assert store._on_add is None
+        assert store._on_promote is None
+        assert store._on_expire is None
+        assert store._on_decay is None
+        assert store._on_supersede is None
+
+    def test_callbacks_stored_as_instance_variables(self):
+        def mock_callback(op: str, duration: float, ctx: dict) -> None:
+            pass
+
+        store = self._make_store(
+            on_search=mock_callback,
+            on_add=mock_callback,
+            on_promote=mock_callback,
+            on_expire=mock_callback,
+            on_decay=mock_callback,
+            on_supersede=mock_callback,
+        )
+        assert store._on_search is mock_callback
+        assert store._on_add is mock_callback
+        assert store._on_promote is mock_callback
+        assert store._on_expire is mock_callback
+        assert store._on_decay is mock_callback
+        assert store._on_supersede is mock_callback
+
+    def test_partial_callback_assignment(self):
+        def mock_search(op: str, duration: float, ctx: dict) -> None:
+            pass
+
+        def mock_add(op: str, duration: float, ctx: dict) -> None:
+            pass
+
+        store = self._make_store(on_search=mock_search, on_add=mock_add)
+        assert store._on_search is mock_search
+        assert store._on_add is mock_add
+        assert store._on_promote is None
+        assert store._on_expire is None
+        assert store._on_decay is None
+        assert store._on_supersede is None
+
+
+class TestObservabilityCallbacks:
+    """Tests for _invoke_callback helper method."""
+
+    def _make_store(self):
+        from tests.helpers import FakeEmbeddingProvider
+        return MemoryStore(
+            "postgresql+asyncpg://fake@localhost/fake",
+            FakeEmbeddingProvider(dims=16),
+        )
+
+    def test_invoke_callback_returns_early_if_none(self):
+        store = self._make_store()
+        # Should not raise
+        store._invoke_callback(None, "test_op", 10.5, {"key": "value"})
+
+    def test_invoke_callback_calls_callback_with_correct_args(self):
+        store = self._make_store()
+        captured = []
+
+        def mock_callback(op: str, duration: float, ctx: dict) -> None:
+            captured.append((op, duration, ctx))
+
+        store._invoke_callback(mock_callback, "search", 123.45, {"user": "u1", "count": 5})
+        assert len(captured) == 1
+        assert captured[0] == ("search", 123.45, {"user": "u1", "count": 5})
+
+    def test_invoke_callback_catches_exceptions(self, caplog):
+        import logging
+        caplog.set_level(logging.WARNING)
+        
+        store = self._make_store()
+
+        def failing_callback(op: str, duration: float, ctx: dict) -> None:
+            raise ValueError("Intentional test failure")
+
+        # Should not propagate exception
+        store._invoke_callback(failing_callback, "add", 50.0, {})
+        
+        # Should log warning
+        assert any("Observability callback failed" in rec.message for rec in caplog.records)
+        assert any("add" in rec.message for rec in caplog.records)
+
+    def test_invoke_callback_multiple_invocations(self):
+        store = self._make_store()
+        call_count = []
+
+        def counting_callback(op: str, duration: float, ctx: dict) -> None:
+            call_count.append((op, duration))
+
+        store._invoke_callback(counting_callback, "op1", 10.0, {})
+        store._invoke_callback(counting_callback, "op2", 20.0, {})
+        store._invoke_callback(counting_callback, "op3", 30.0, {})
+
+        assert len(call_count) == 3
+        assert call_count[0] == ("op1", 10.0)
+        assert call_count[1] == ("op2", 20.0)
+        assert call_count[2] == ("op3", 30.0)
+

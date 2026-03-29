@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import (
 
 from .embeddings import EmbeddingProvider
 from .models import Base, build_table
-from .types import Category, Memory, SearchQuery, SearchResult
+from .types import Category, Memory, ObservabilityCallback, SearchQuery, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,23 @@ class MemoryStore:
                     # ... long-running query ...
 
         enrich_embeddings: Prepend category to text before embedding (default: True)
+        on_search: Optional callback fired after each search operation
+        on_add: Optional callback fired after each add/add_many operation
+        on_promote: Optional callback fired after each promote operation
+        on_expire: Optional callback fired after each expire operation
+        on_decay: Optional callback fired after each decay operation
+        on_supersede: Optional callback fired after each supersede operation
+
+    Observability Callbacks:
+        All callbacks follow the signature: (operation: str, duration_ms: float, context: dict[str, Any]) -> None
+
+        - operation: operation name (e.g., "search", "add", "promote")
+        - duration_ms: operation duration in milliseconds
+        - context: operation-specific metadata (user_id, memory_id, result_count, etc.)
+
+        Callbacks are invoked fire-and-forget — exceptions are caught and logged,
+        never propagated to the caller. This allows metrics integration (Prometheus,
+        Datadog, custom systems) without impacting store reliability.
 
     Connection Resilience:
         - pool_pre_ping=True: Validates connections before use, preventing stale
@@ -88,11 +105,25 @@ class MemoryStore:
         pool_recycle: int = 300,
         statement_timeout_ms: int = 30000,
         enrich_embeddings: bool = True,
+        on_search: ObservabilityCallback | None = None,
+        on_add: ObservabilityCallback | None = None,
+        on_promote: ObservabilityCallback | None = None,
+        on_expire: ObservabilityCallback | None = None,
+        on_decay: ObservabilityCallback | None = None,
+        on_supersede: ObservabilityCallback | None = None,
     ):
         self._connection_string = connection_string
         self._embedder = embedding_provider
         self._table_name = table_name
         self._enrich_embeddings = enrich_embeddings
+
+        # Observability callbacks
+        self._on_search = on_search
+        self._on_add = on_add
+        self._on_promote = on_promote
+        self._on_expire = on_expire
+        self._on_decay = on_decay
+        self._on_supersede = on_supersede
 
         self._model = build_table(table_name, embedding_provider.dimensions)
 
@@ -124,6 +155,34 @@ class MemoryStore:
         if self._enrich_embeddings:
             return f"{category.value}: {text}"
         return text
+
+    def _invoke_callback(
+        self,
+        callback: ObservabilityCallback | None,
+        operation: str,
+        duration_ms: float,
+        context: dict[str, Any],
+    ) -> None:
+        """Invoke an observability callback with fire-and-forget semantics.
+
+        If callback is None, returns immediately. Otherwise invokes the callback
+        with (operation, duration_ms, context). Exceptions are caught and logged
+        with logger.warning() but never propagated to the caller.
+
+        This ensures metrics integration failures never impact store reliability.
+        """
+        if callback is None:
+            return
+
+        try:
+            callback(operation, duration_ms, context)
+        except Exception as e:
+            logger.warning(
+                "Observability callback failed for operation '%s': %s",
+                operation,
+                e,
+                exc_info=True,
+            )
 
     # ────────────────────────────────────────────────────────────────
     # Setup
