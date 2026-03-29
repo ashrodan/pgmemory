@@ -573,23 +573,75 @@ class MemoryStore:
 
         Returns (new_memory_id, list_of_superseded_ids).
         """
-        conflicts = await self.find_conflicts(
-            app_name, user_id, new_text, category, threshold=threshold
-        )
-        superseded_ids = []
-        for c in conflicts:
-            if c.memory.id is not None:
-                await self.expire(c.memory.id, reason=f"superseded (sim={c.similarity})")
-                superseded_ids.append(c.memory.id)
-
-        new_id = await self.add(
-            app_name,
-            user_id,
-            new_text,
-            category=category,
-            **add_kwargs,
-        )
-        return new_id, superseded_ids
+        await self._ensure_init()
+        
+        # Generate embeddings outside transaction (per D002 — prevents lock contention)
+        embed_text = self._enriched_text(new_text, category)
+        embeddings = await self._embedder.embed([embed_text])
+        vec = embeddings[0]
+        
+        M = self._model
+        cat_val = category.value if isinstance(category, Category) else category
+        now = datetime.now(timezone.utc)
+        
+        # Single transaction: find conflicts, expire them, add new memory
+        async with self._session_factory() as db:
+            # Find conflicts
+            similarity_expr = (1 - M.content_embedding.cosine_distance(vec)).label(
+                "similarity"
+            )
+            
+            conflict_stmt = (
+                select(M.id, similarity_expr)
+                .where(
+                    M.app_name == app_name,
+                    M.user_id == user_id,
+                    M.category == cat_val,
+                    M.valid_until.is_(None),  # only active
+                )
+                .order_by(M.content_embedding.cosine_distance(vec))
+                .limit(5)
+            )
+            
+            conflict_result = await db.execute(conflict_stmt)
+            conflict_rows = conflict_result.all()
+            
+            # Filter by threshold and collect IDs
+            superseded_ids = [
+                memory_id for memory_id, sim in conflict_rows if sim >= threshold
+            ]
+            
+            # Bulk expire conflicts
+            if superseded_ids:
+                await db.execute(
+                    update(M)
+                    .where(M.id.in_(superseded_ids))
+                    .values(valid_until=now)
+                )
+            
+            # Add new memory
+            mem = Memory(
+                app_name=app_name,
+                user_id=user_id,
+                text=new_text,
+                category=category,
+                importance=max(1, min(5, add_kwargs.get("importance", 1))),
+                created_at=now,
+                valid_from=now,
+                valid_until=add_kwargs.get("valid_until"),
+                source_session_id=add_kwargs.get("source_session_id"),
+                source_event_id=add_kwargs.get("source_event_id"),
+                source_event_timestamp=add_kwargs.get("source_event_timestamp"),
+                source_role=add_kwargs.get("source_role"),
+                metadata=add_kwargs.get("metadata", {}),
+            )
+            
+            row = M.from_memory(mem, vec)
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            
+            return row.id, superseded_ids
 
     # ────────────────────────────────────────────────────────────────
     # Bulk / admin
