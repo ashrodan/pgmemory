@@ -861,3 +861,90 @@ class MemoryStore:
         async with self._session_factory() as db:
             result = await db.execute(stmt)
             return [row[0] for row in result.all()]
+
+    async def get_all(
+        self,
+        app_name: str,
+        user_id: str,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> list[Memory]:
+        """Retrieve all active memories for a user with pagination.
+
+        Used for GDPR export / full user memory retrieval. Returns memories
+        ordered by created_at (stable sort for repeatable pagination).
+
+        Does NOT fetch content_embedding or content_tsv columns to avoid OOM
+        on large datasets.
+
+        Args:
+            app_name: Application name
+            user_id: User identifier
+            offset: Number of results to skip (default: 0)
+            limit: Maximum results to return (default: 100)
+
+        Returns:
+            List of Memory objects ordered by created_at ascending
+        """
+        await self._ensure_init()
+        M = self._model
+        now = datetime.now(timezone.utc)
+
+        # Select all columns except content_embedding and content_tsv
+        # to avoid OOM on large datasets
+        stmt = (
+            select(
+                M.id,
+                M.app_name,
+                M.user_id,
+                M.content,
+                M.category,
+                M.importance,
+                M.created_at,
+                M.valid_from,
+                M.valid_until,
+                M.last_accessed,
+                M.source_session_id,
+                M.source_event_id,
+                M.source_event_timestamp,
+                M.source_role,
+                M.metadata_,
+            )
+            .where(
+                M.app_name == app_name,
+                M.user_id == user_id,
+                M.valid_from <= now,
+                (M.valid_until.is_(None)) | (M.valid_until > now),
+            )
+            .order_by(M.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+
+        async with self._session_factory() as db:
+            result = await db.execute(stmt)
+            rows = result.all()
+            
+            # Manually construct Memory objects from selected columns
+            memories = []
+            for row in rows:
+                mem = Memory(
+                    id=row.id,
+                    app_name=row.app_name,
+                    user_id=row.user_id,
+                    text=row.content,
+                    category=Category(row.category),
+                    importance=row.importance,
+                    created_at=row.created_at,
+                    valid_from=row.valid_from,
+                    valid_until=row.valid_until,
+                    last_accessed=row.last_accessed,
+                    source_session_id=row.source_session_id,
+                    source_event_id=row.source_event_id,
+                    source_event_timestamp=row.source_event_timestamp,
+                    source_role=row.source_role,
+                    metadata=row.metadata_ or {},
+                )
+                memories.append(mem)
+            
+            return memories

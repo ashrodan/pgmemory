@@ -380,6 +380,55 @@ class TestAdmin:
         assert "alpha" in users
         assert "beta" in users
 
+    @pytest.mark.asyncio
+    async def test_get_all_pagination(self, store):
+        """Verify get_all() retrieves all memories with stable pagination.
+        
+        Seeds 25 memories, pages through with limit=10 and offset=0/10/20,
+        verifies all memories retrieved exactly once with no duplicates or omissions.
+        """
+        app = "export_app"
+        user = "export_user"
+        
+        # Seed 25 memories
+        mem_ids = []
+        for i in range(25):
+            mid = await store.add(app, user, f"Memory {i:02d}")
+            mem_ids.append(mid)
+        
+        # Page 1: offset=0, limit=10
+        page1 = await store.get_all(app, user, offset=0, limit=10)
+        assert len(page1) == 10
+        
+        # Page 2: offset=10, limit=10
+        page2 = await store.get_all(app, user, offset=10, limit=10)
+        assert len(page2) == 10
+        
+        # Page 3: offset=20, limit=10 (only 5 remaining)
+        page3 = await store.get_all(app, user, offset=20, limit=10)
+        assert len(page3) == 5
+        
+        # Collect all retrieved IDs
+        all_retrieved_ids = (
+            [m.id for m in page1]
+            + [m.id for m in page2]
+            + [m.id for m in page3]
+        )
+        
+        # Verify no duplicates
+        assert len(all_retrieved_ids) == len(set(all_retrieved_ids)), \
+            "Pagination returned duplicate memories"
+        
+        # Verify all seeded memories were retrieved
+        assert len(all_retrieved_ids) == 25, \
+            "Not all memories were retrieved across pages"
+        
+        # Verify results are ordered by created_at (stable sort)
+        for page in [page1, page2, page3]:
+            for i in range(len(page) - 1):
+                assert page[i].created_at <= page[i + 1].created_at, \
+                    "Results not ordered by created_at"
+
 
 # ── Concurrency ────────────────────────────────────────────────────────
 
