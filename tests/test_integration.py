@@ -9,6 +9,7 @@ Set PGMEMORY_TEST_URL to skip testcontainers and use an existing database:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -340,6 +341,123 @@ class TestAdmin:
         users = await store.list_users("users_app")
         assert "alpha" in users
         assert "beta" in users
+
+
+# ── Concurrency ────────────────────────────────────────────────────────
+
+
+class TestConcurrency:
+    @pytest.mark.asyncio
+    async def test_concurrent_promote_same_memory(self, store):
+        """Fire 5 concurrent promote(increment=1) calls on the same memory,
+        verify final importance is clamped to 5."""
+        mid = await store.add("conc_app", "u1", "Concurrently promoted", importance=1)
+        
+        # Fire 5 concurrent promotions
+        await asyncio.gather(
+            store.promote(mid, increment=1),
+            store.promote(mid, increment=1),
+            store.promote(mid, increment=1),
+            store.promote(mid, increment=1),
+            store.promote(mid, increment=1),
+        )
+        
+        mem = await store.get(mid)
+        # Starting importance: 1
+        # 5 increments of 1 = 6, but clamped to 5
+        assert mem.importance == 5
+        assert mem.last_accessed is not None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_supersede_same_category(self, store):
+        """Fire 3 concurrent supersede() calls with similar texts in the same category.
+        Verifies that:
+        1. Pre-existing memory is expired by at least one transaction
+        2. Concurrent supersedes may create duplicates (READ COMMITTED allows this)
+        3. Each new memory has correct content"""
+        # Add a pre-existing memory to supersede
+        existing_id = await store.add(
+            "sup_conc_app", "u1", "User prefers light theme",
+            category=Category.PREFERENCE
+        )
+        
+        # Fire 3 concurrent supersedes with similar text
+        results = await asyncio.gather(
+            store.supersede("sup_conc_app", "u1", "User prefers dark theme",
+                           Category.PREFERENCE, threshold=0.7),
+            store.supersede("sup_conc_app", "u1", "User prefers dark theme",
+                           Category.PREFERENCE, threshold=0.7),
+            store.supersede("sup_conc_app", "u1", "User prefers dark theme",
+                           Category.PREFERENCE, threshold=0.7),
+        )
+        
+        # Each supersede returns (new_id, list_of_superseded_ids)
+        new_ids = [r[0] for r in results]
+        all_superseded = [sid for r in results for sid in r[1]]
+        
+        # Verify all three operations created new memories
+        assert len(new_ids) == 3
+        assert len(set(new_ids)) == 3, "Each supersede should create a distinct memory"
+        
+        # The pre-existing memory should be expired by at least one transaction
+        existing_mem = await store.get(existing_id)
+        assert existing_mem.is_expired, \
+            "Pre-existing memory should have been expired"
+        
+        # Get all memories for this app/user/category
+        q = SearchQuery(
+            app_name="sup_conc_app",
+            user_id="u1",
+            text="",
+            categories=[Category.PREFERENCE],
+            include_expired=True,
+            similarity_threshold=0.0,
+        )
+        all_results = await store.search(q)
+        all_memories = [r.memory for r in all_results]
+        
+        # Count active memories - due to READ COMMITTED isolation, concurrent
+        # supersedes racing may create 1-3 active memories depending on timing
+        active_memories = [m for m in all_memories if not m.is_expired]
+        
+        assert 1 <= len(active_memories) <= 3, \
+            f"Expected 1-3 active memories (timing dependent), got {len(active_memories)}"
+        
+        # All active memories should have the new text
+        for mem in active_memories:
+            assert mem.text == "User prefers dark theme"
+
+    @pytest.mark.asyncio
+    async def test_promote_at_max_importance(self, store):
+        """Verify promoting a memory already at importance=5 doesn't break (stays at 5)."""
+        mid = await store.add("max_app", "u1", "Already maxed", importance=5)
+        
+        # Promote 3 times
+        await store.promote(mid, increment=1)
+        await store.promote(mid, increment=2)
+        await store.promote(mid, increment=1)
+        
+        mem = await store.get(mid)
+        # Should stay at 5 (clamped)
+        assert mem.importance == 5
+
+    @pytest.mark.asyncio
+    async def test_supersede_with_no_conflicts(self, store):
+        """Verify supersede() with threshold=0.99 (no matches) correctly adds
+        the new memory without errors."""
+        new_id, superseded = await store.supersede(
+            "noconf_app", "u1", "Unique memory with no conflicts",
+            Category.FACT, threshold=0.99,
+        )
+        
+        assert new_id > 0
+        assert len(superseded) == 0
+        
+        mem = await store.get(new_id)
+        assert mem is not None
+        assert mem.text == "Unique memory with no conflicts"
+        assert mem.category == Category.FACT
+        assert not mem.is_expired
 
 
 # ── Embedding enrichment ──────────────────────────────────────────────
