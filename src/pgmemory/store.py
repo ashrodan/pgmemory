@@ -419,7 +419,7 @@ class MemoryStore:
                 update(self._model)
                 .where(self._model.id == memory_id)
                 .values(
-                    importance=self._model.importance + increment,
+                    importance=func.least(self._model.importance + increment, 5),
                     last_accessed=datetime.now(timezone.utc),
                     valid_until=None,
                 )
