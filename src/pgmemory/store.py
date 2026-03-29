@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Sequence
+from typing import Any, Sequence
 
 from sqlalchemy import delete, func, literal_column, select, text, update
 from sqlalchemy.ext.asyncio import (
@@ -237,6 +238,7 @@ class MemoryStore:
         metadata: dict | None = None,
     ) -> int:
         """Store a single memory. Returns its ID."""
+        start = time.perf_counter()
         await self._ensure_init()
 
         embed_text = self._enriched_text(text_content, category)
@@ -264,6 +266,15 @@ class MemoryStore:
             db.add(row)
             await db.commit()
             await db.refresh(row)
+            
+            duration_ms = (time.perf_counter() - start) * 1000
+            self._invoke_callback(
+                self._on_add,
+                "add",
+                duration_ms,
+                {"app_name": app_name, "user_id": user_id, "count": 1},
+            )
+            
             return row.id
 
     async def add_many(
@@ -271,6 +282,7 @@ class MemoryStore:
         memories: Sequence[Memory],
     ) -> list[int]:
         """Batch-insert multiple memories. Returns their IDs."""
+        start = time.perf_counter()
         await self._ensure_init()
 
         if not memories:
@@ -287,6 +299,20 @@ class MemoryStore:
                 await db.flush()
                 ids.append(row.id)
             await db.commit()
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        # Use first memory's app_name/user_id for context (all should be same user)
+        self._invoke_callback(
+            self._on_add,
+            "add_many",
+            duration_ms,
+            {
+                "app_name": memories[0].app_name,
+                "user_id": memories[0].user_id,
+                "count": len(memories),
+            },
+        )
+        
         return ids
 
     # ────────────────────────────────────────────────────────────────
@@ -309,6 +335,7 @@ class MemoryStore:
 
         Where recency_decay = 1 / (1 + days_old / 30)
         """
+        start = time.perf_counter()
         await self._ensure_init()
 
         M = self._model
@@ -430,6 +457,20 @@ class MemoryStore:
             len(results),
             len(rows),
         )
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        self._invoke_callback(
+            self._on_search,
+            "search",
+            duration_ms,
+            {
+                "app_name": query.app_name,
+                "user_id": query.user_id,
+                "query": query.text,
+                "result_count": len(results),
+            },
+        )
+        
         return results
 
     async def search_many(
@@ -472,6 +513,7 @@ class MemoryStore:
 
     async def promote(self, memory_id: int, increment: int = 1) -> None:
         """Bump importance. Clears valid_until (reinforced = durable)."""
+        start = time.perf_counter()
         await self._ensure_init()
         async with self._session_factory() as db:
             await db.execute(
@@ -484,9 +526,18 @@ class MemoryStore:
                 )
             )
             await db.commit()
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        self._invoke_callback(
+            self._on_promote,
+            "promote",
+            duration_ms,
+            {"memory_id": memory_id},
+        )
 
     async def expire(self, memory_id: int, *, reason: str = "expired") -> None:
         """Soft-expire a memory (set valid_until = now, log reason in metadata)."""
+        start = time.perf_counter()
         await self._ensure_init()
         now = datetime.now(timezone.utc)
         async with self._session_factory() as db:
@@ -502,6 +553,14 @@ class MemoryStore:
                 .values(valid_until=now, metadata_=existing)
             )
             await db.commit()
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        self._invoke_callback(
+            self._on_expire,
+            "expire",
+            duration_ms,
+            {"memory_id": memory_id, "reason": reason},
+        )
 
     async def decay(
         self,
@@ -516,6 +575,7 @@ class MemoryStore:
 
         Returns number of rows deleted.
         """
+        start = time.perf_counter()
         await self._ensure_init()
         now = datetime.now(timezone.utc)
         stmt = delete(self._model).where(
@@ -531,7 +591,20 @@ class MemoryStore:
             count = result.rowcount
             if count:
                 logger.info("decay: deleted %d expired memories", count)
-            return count
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        self._invoke_callback(
+            self._on_decay,
+            "decay",
+            duration_ms,
+            {
+                "app_name": app_name or "all",
+                "user_id": "all",
+                "expired_count": count,
+            },
+        )
+        
+        return count
 
     async def soft_expire_stale(
         self,
@@ -545,6 +618,7 @@ class MemoryStore:
         Memories with importance >= min_importance are left alone.
         Returns number of rows updated.
         """
+        start = time.perf_counter()
         await self._ensure_init()
         cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
         now = datetime.now(timezone.utc)
@@ -564,7 +638,21 @@ class MemoryStore:
         async with self._session_factory() as db:
             result = await db.execute(stmt)
             await db.commit()
-            return result.rowcount
+            count = result.rowcount
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        self._invoke_callback(
+            self._on_decay,
+            "soft_expire_stale",
+            duration_ms,
+            {
+                "app_name": app_name or "all",
+                "user_id": "all",
+                "stale_count": count,
+            },
+        )
+        
+        return count
 
     # ────────────────────────────────────────────────────────────────
     # Conflict resolution
@@ -632,6 +720,7 @@ class MemoryStore:
 
         Returns (new_memory_id, list_of_superseded_ids).
         """
+        start = time.perf_counter()
         await self._ensure_init()
         
         # Generate embeddings outside transaction (per D002 — prevents lock contention)
@@ -700,7 +789,22 @@ class MemoryStore:
             await db.commit()
             await db.refresh(row)
             
-            return row.id, superseded_ids
+            new_id = row.id
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        self._invoke_callback(
+            self._on_supersede,
+            "supersede",
+            duration_ms,
+            {
+                "app_name": app_name,
+                "user_id": user_id,
+                "new_id": new_id,
+                "superseded_count": len(superseded_ids),
+            },
+        )
+        
+        return new_id, superseded_ids
 
     # ────────────────────────────────────────────────────────────────
     # Bulk / admin

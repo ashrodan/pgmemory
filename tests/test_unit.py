@@ -283,3 +283,22 @@ class TestObservabilityCallbacks:
         assert call_count[1] == ("op2", 20.0)
         assert call_count[2] == ("op3", 30.0)
 
+    def test_all_operations_have_callback_invocation_in_code(self):
+        """Code inspection: verify all 8 operations have timing + callback invocation."""
+        import inspect
+        from pgmemory.store import MemoryStore
+        
+        # Operations that should have instrumentation
+        operations = ["search", "add", "add_many", "promote", "expire", "decay", "soft_expire_stale", "supersede"]
+        
+        for op_name in operations:
+            method = getattr(MemoryStore, op_name)
+            source = inspect.getsource(method)
+            
+            # Verify timing measurement
+            assert "time.perf_counter()" in source, f"{op_name} missing timing measurement"
+            
+            # Verify callback invocation
+            assert "_invoke_callback" in source, f"{op_name} missing callback invocation"
+            assert "duration_ms" in source, f"{op_name} missing duration_ms variable"
+
