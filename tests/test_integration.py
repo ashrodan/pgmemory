@@ -216,6 +216,44 @@ class TestSearch:
         mem_after = await store.get(mid)
         assert mem_after.last_accessed is not None
 
+    @pytest.mark.asyncio
+    async def test_search_offset_pagination(self, store):
+        # Seed 15 memories with sequential content to ensure stable ordering
+        for i in range(15):
+            await store.add(
+                "page_app", "u1", f"Memory number {i:02d}",
+                category=Category.GENERAL, importance=3
+            )
+        
+        # Page 1: offset=0, top_k=5
+        page1 = await store.search(
+            SearchQuery(app_name="page_app", user_id="u1", text="", top_k=5, offset=0)
+        )
+        
+        # Page 2: offset=5, top_k=5
+        page2 = await store.search(
+            SearchQuery(app_name="page_app", user_id="u1", text="", top_k=5, offset=5)
+        )
+        
+        # Page 3: offset=10, top_k=5
+        page3 = await store.search(
+            SearchQuery(app_name="page_app", user_id="u1", text="", top_k=5, offset=10)
+        )
+        
+        # Verify all pages have correct size
+        assert len(page1) == 5
+        assert len(page2) == 5
+        assert len(page3) == 5
+        
+        # Verify non-overlapping results
+        ids1 = {r.memory.id for r in page1}
+        ids2 = {r.memory.id for r in page2}
+        ids3 = {r.memory.id for r in page3}
+        
+        assert len(ids1 & ids2) == 0, "Page 1 and 2 should not overlap"
+        assert len(ids1 & ids3) == 0, "Page 1 and 3 should not overlap"
+        assert len(ids2 & ids3) == 0, "Page 2 and 3 should not overlap"
+
 
 # ── Lifecycle ──────────────────────────────────────────────────────────
 

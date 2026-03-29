@@ -136,6 +136,7 @@ class SearchQuery:
     min_importance: int | None = None
     include_expired: bool = False
     top_k: int = 10
+    offset: int = 0                 # pagination offset (default: 0)
     similarity_threshold: float = 0.2
     threshold_percentile: float | None = None  # 0.0–1.0, e.g. 0.3 = filter bottom 30%
 

@@ -58,6 +58,10 @@ class TestSearchQuery:
         assert q.similarity_threshold == 0.2
         assert not q.include_expired
 
+    def test_offset_default(self):
+        q = SearchQuery(app_name="a", user_id="u", text="q")
+        assert q.offset == 0
+
     def test_weights_customisable(self):
         q = SearchQuery(
             app_name="a", user_id="u", text="q",

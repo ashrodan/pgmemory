@@ -398,11 +398,11 @@ class MemoryStore:
         if query.min_importance is not None:
             stmt = stmt.where(M.importance >= query.min_importance)
 
-        # ── Sort + limit ────────────────────────────────────────────
+        # ── Sort + limit + offset ───────────────────────────────────
         if is_browse:
-            stmt = stmt.order_by(M.created_at.desc()).limit(query.top_k)
+            stmt = stmt.order_by(M.created_at.desc()).limit(query.top_k).offset(query.offset)
         else:
-            stmt = stmt.order_by(combined_expr.desc()).limit(query.top_k)
+            stmt = stmt.order_by(combined_expr.desc()).limit(query.top_k).offset(query.offset)
 
         # ── Execute ─────────────────────────────────────────────────
         async with self._session_factory() as db:
